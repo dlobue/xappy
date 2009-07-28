@@ -41,6 +41,8 @@ from indexerconnection import IndexerConnection, PrefixedTermIter, \
          DocumentIter, SynonymIter, _allocate_id
 import re as _re
 from query import Query
+import colour
+import numpy
 
 def add_to_dict_of_dicts(d, key, item, value):
     """Add to an an entry to a dict of dicts.
@@ -2990,7 +2992,7 @@ class SearchConnection(object):
             min_normlen = weight_params.get('min_normlen', 0.5)
             if min_normlen < 0:
                 raise ValueError("min_normlen must be >= 0")
-            wt = xapian.BM25Weight(k1, k2, k3, b, min_normlen)
+            wt = xapian.ColourWeight(k1, k2, k3, b, min_normlen)
             enq.set_weighting_scheme(wt)
             enq._wt = wt # Ensure that wt isn't dereferenced too soon.
 
@@ -3492,6 +3494,68 @@ class SearchConnection(object):
         return Query(_xapian.Query(ps),
                      _refs=[ps], _conn=self,
                      _serialised=serialised)
+
+    def query_colour(self, field, colour_freqs, clustering=True):
+        """ Generate a query to find document with similar colours in
+        `field` to those specified in `colour_freqs`. `colour_freqs`
+        should be at iterable whose members are lists or tuples
+        consisting of 3 data. These being (in order) a sequence
+        consisting rgb colour coordinates, each in the range 0-255; a
+        frequency measure and a precision measure.
+
+        If `clustering` is True then individual colours will be grouped
+        together into clusters, and the total frequency for the
+        cluster used to weight terms for its consituent colours.
+
+        If `clustering` is False then no clustering will be done and each
+        frequency is simply used to weight the terms generated from
+        that colour.
+
+        In either case each colour will be used to generate terms for
+        colours close to that colour, with decreasing weights as the
+        distance increases. The number of terms generated is
+        controlled by the precision, which indicates the percentage of
+        the total range of colour values represented by the
+        colour. Note that the higher this value the more terms that
+        will be generated, which may affect performance. A value of 0
+        means that only one term will be generated. (It is not
+        possible to exclude a colour completely with this mechanism -
+        simply omit it from `colour_freqs` to achieve this.)
+
+        Calling this method with a `field` that has not been indexed
+        with the COLOUR field action will result in an empty query
+        being returned.
+
+        """
+        try:
+            action_params = self._field_actions[field]._actions[FieldActions.COLOUR][0]
+        except KeyError:
+            return Query()
+        l_step = action_params.get('l_step')
+        a_step = action_params.get('a_step')
+        b_step = action_params.get('b_step')
+        if not (l_step and a_step and b_step):
+            return Query()
+        
+        prefix = self._field_mappings.get_prefix(field)
+
+        def term_subqs(terms_and_weights):
+            return [Query(xapian.Query(prefix+term), _conn=self) * weight for
+                    term, weight in terms_and_weights.iteritems()]
+
+        if clustering:
+            subqs = []
+            for cluster in colour.do_clustering(colour_freqs):
+                terms_and_weights = colour.terms_and_weights(
+                    cluster, l_step, a_step, b_step)
+                subqs.append(Query.compose(Query.OP_OR,
+                                           term_subqs(terms_and_weights)))
+            return Query.compose(Query.OP_AND, subqs)
+        else:
+            terms_and_weights = colour.terms_and_weights(
+                colour_freqs, l_step, a_step, b_step)
+            subqs = term_subqs(terms_and_weights)
+            return Query.compose(Query.OP_OR, subqs)
 
 if __name__ == '__main__':
     import doctest, sys

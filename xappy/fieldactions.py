@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (C) 2007 Lemur Consulting Ltd
+# Copyright (C) 2007, 2008, 2009 Lemur Consulting Ltd
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,12 +15,15 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-r"""fieldactions.py: Definitions and implementations of field actions.
+"""fieldactions.py: Definitions and implementations of field actions.
 
 """
 __docformat__ = "restructuredtext en"
 
+import collections
+
 import _checkxapian
+import colour
 import errors
 import fields
 import marshall
@@ -353,6 +356,24 @@ def _act_sort_and_collapse(fieldname, doc, field, context, type=None, ranges=Non
     doc.add_value(fieldname, marshalled_value, 'collsort')
     _range_accel_act(doc, field.value, ranges, _range_accel_prefix)
 
+
+
+def _act_colour(fieldname, doc, field, context, colour_type='rgb',
+                l_step=None, a_step=None, b_step=None ):
+
+    if not (l_step and a_step and b_step):
+        raise IndexerError("Not all steps passed to _act_colour")
+
+    if colour_type != 'rgb':
+        raise NotImplementedError("colour type: %s is not supported" % \
+                                  colour_type)
+    for val in field.value:
+        col, freq = val
+        r, g, b = col
+        term = colour.term_for_rgb_point(r, g, b, l_step, a_step, b_step)
+        doc.add_term(fieldname, term, wdfinc=freq)
+    
+
 class ActionContext(object):
     """The context in which an action is performed.
 
@@ -458,6 +479,25 @@ class FieldActions(object):
       supplied must be a url that references the image data. The image
       must be a JPEG or a format supported by the QImageIO
       class. <http://doc.trolltech.com/3.3/qimageio.html>
+
+    - `COLOUR`: Index colours for colour distance searching. For
+      effeciency reasons data is stored by identifying which of a
+      pre-determined set of `buckets` is closest to the supplied
+      colour(s). Internally the LAB colourspace is used to store
+      values because cartesian distance in this space corresponds well
+      with human perception of colour differences. 
+
+      At present colour may only be supplied as RGB data in the range
+      0-1, but support for other input colours may be added at some point.
+
+      The granularity of the buckets is specified by the parameter
+      `step_count`, which defaults to 100. This may also be an
+      iterable of 3 floats, in which case it specifies the step size
+      for each of the l, a, b coordinates. Higher values will result
+      in greater precision, but potentially slower performance, lower
+      values will mean lower precision but potentially better
+      performance.
+    
     """
 
     # See the class docstring for the meanings of the following constants.
@@ -470,6 +510,7 @@ class FieldActions(object):
     WEIGHT = 8
     GEOLOCATION = 9
     IMGSEEK = 10
+    COLOUR = 11
 
     # Sorting and collapsing store the data in a value, but the format depends
     # on the sort type.  Easiest way to implement is to treat them as the same
@@ -495,6 +536,7 @@ class FieldActions(object):
 
         """
         if action in self._unsupported_actions:
+            print "action: ", action
             raise errors.IndexerError("Action unsupported with this release of xapian")
 
         if action not in (FieldActions.STORE_CONTENT,
@@ -506,6 +548,7 @@ class FieldActions(object):
                           FieldActions.WEIGHT,
                           FieldActions.GEOLOCATION,
                           FieldActions.IMGSEEK,
+                          FieldActions.COLOUR,
                          ):
             raise errors.IndexerError("Unknown field action: %r" % action)
 
@@ -550,6 +593,21 @@ class FieldActions(object):
                         if oldaction.get('ranges') == kwargs['ranges']:
                             kwargs['_range_accel_prefix'] = old_accel_prefix
 
+        if action == FieldActions.COLOUR:
+            step_count = kwargs.get('step_count')
+            if step_count is None:
+                step_count = 100.0
+            step_sizes = colour.compute_steps(step_count)
+            oldactions = self._actions.get(FieldActions.COLOUR)
+            for step, size in zip(('l_step', 'a_step', 'b_step'), step_sizes):
+                if oldactions is not None:
+                    if oldactions[step] != size:
+                        message = "Cannot change colour steps for field: %s" % \
+                                  self._fieldname
+                        raise IndexerError(message)
+                kwargs[step] = size
+
+
         # Fields cannot be indexed as more than one type for "SORTABLE": to
         # implement this, we'd need to use a different prefix for each sortable
         # type, but even then the search end wouldn't know what to sort on when
@@ -584,7 +642,6 @@ class FieldActions(object):
                     raise errors.IndexerError("Field %r is already marked for "
                                                "sorting, with a different "
                                                "sort type" % self._fieldname)
-
         if 'prefix' in info[3]:
             field_mappings.add_prefix(self._fieldname)
 
@@ -657,6 +714,8 @@ class FieldActions(object):
                 info[2](self._fieldname, doc, field, context, **kwargs)
 
     _action_info = {
+        COLOUR: ('COLOUR', ('step_count',), _act_colour,
+                 {'prefix': True}, ),
         STORE_CONTENT: ('STORE_CONTENT', ('link_associations', ), _act_store_content, {}, ),
         INDEX_EXACT: ('INDEX_EXACT', (), _act_index_exact, {'prefix': True}, ),
         INDEX_FREETEXT: ('INDEX_FREETEXT', ('weight', 'language', 'stop', 'spell', 'nopos', 'allow_field_specific', 'search_by_default', ),
@@ -695,7 +754,36 @@ class ActionSet(object):
     def __iter__(self):
         return iter(self.actions)
 
+
+    def normalise_colour_frequencies(self, fields):
+        """ Modify all the colour frequencies specified for a field
+        with the COLOUR action so that they sum to 1000.
+        """
+        colour_vals = collections.defaultdict(int)
+
+        #loop once to find the total frequency for each colour field
+        for field in fields:
+            try:
+                actions = self.actions[field.name]
+            except KeyError:
+                continue
+            if FieldActions.COLOUR in actions._actions:
+                for val in field.value:
+                    col, freq = val
+                    colour_vals[field.name] += freq
+
+        #loop again to scale each frequency so that they sum to 1000
+        for field in fields:
+            if field.name in colour_vals:
+                newval = []
+                for val in field.value:
+                    col, freq = val
+                    proportion = float(freq)/ float(colour_vals[field.name])
+                    newval.append((col, int(proportion * 1000.0)))
+                field.value = newval
+
     def perform(self, result, document, context, store_only=False):
+        self.normalise_colour_frequencies(document.fields)
         for field_or_group in document.fields:
             if isinstance(field_or_group, fields.FieldGroup):
                 context.currfield_group = []
