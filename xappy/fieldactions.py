@@ -23,7 +23,6 @@ __docformat__ = "restructuredtext en"
 import collections
 
 import _checkxapian
-import colour
 import errors
 import fields
 import marshall
@@ -196,7 +195,7 @@ def _get_imgterms(conn, fieldname):
         imgterms = xapian.imgseek.ImgTerms(prefix, buckets)
         conn._imgterms_cache[fieldname] = imgterms
     return imgterms
-    
+
 def _act_imgseek(fieldname, doc, field, context, terms=True, buckets=None):
     """ Perform the IMGSEEK action.
 
@@ -356,23 +355,10 @@ def _act_sort_and_collapse(fieldname, doc, field, context, type=None, ranges=Non
     doc.add_value(fieldname, marshalled_value, 'collsort')
     _range_accel_act(doc, field.value, ranges, _range_accel_prefix)
 
-
-
-def _act_colour(fieldname, doc, field, context, colour_type='rgb',
-                l_step=None, a_step=None, b_step=None ):
-
-    if not (l_step and a_step and b_step):
-        raise IndexerError("Not all steps passed to _act_colour")
-
-    if colour_type != 'rgb':
-        raise NotImplementedError("colour type: %s is not supported" % \
-                                  colour_type)
+def _act_colour(fieldname, doc, field, context):
     for val in field.value:
-        col, freq = val
-        r, g, b = col
-        term = colour.term_for_rgb_point(r, g, b, l_step, a_step, b_step)
-        doc.add_term(fieldname, term, wdfinc=freq)
-    
+        colterm, freq = val
+        doc.add_term(fieldname, colterm, wdfinc=freq)
 
 class ActionContext(object):
     """The context in which an action is performed.
@@ -480,25 +466,18 @@ class FieldActions(object):
       must be a JPEG or a format supported by the QImageIO
       class. <http://doc.trolltech.com/3.3/qimageio.html>
 
-    - `COLOUR`: Index colours for colour distance searching. For
-      effeciency reasons data is stored by identifying which of a
-      pre-determined set of `buckets` is closest to the supplied
-      colour(s). Internally the LAB colourspace is used to store
-      values because cartesian distance in this space corresponds well
-      with human perception of colour differences. 
+    - `COLOUR`: Index colours for colour searching. Values supplied
+      must be an iterable of (colourterm, frequency) pairs, indicating
+      the occurence of the colour represented by colourterm. The
+      colourterm itself has no inherent meaning to xappy, but see the
+      documentation relating to colour search for some utililty
+      functions to help with generating useful colourterms from RGB
+      colour data.
 
-      At present colour may only be supplied as RGB data in the range
-      0-1, but support for other input colours may be added at some point.
-
-      The granularity of the buckets is specified by the parameter
-      `step_count`, which defaults to 100. This may also be an
-      iterable of 3 floats, in which case it specifies the step size
-      for each of the l, a, b coordinates. Higher values will result
-      in greater precision, but potentially slower performance, lower
-      values will mean lower precision but potentially better
-      performance.
-    
-    """
+      Internally the frequencies in a field for a given document are
+      normalised so that they sum to (approximately) 1000, so that
+      weights across different documents can be meaningfully compared.
+      """
 
     # See the class docstring for the meanings of the following constants.
     STORE_CONTENT = 1
@@ -592,21 +571,6 @@ class FieldActions(object):
                     if old_accel_prefix is not None:
                         if oldaction.get('ranges') == kwargs['ranges']:
                             kwargs['_range_accel_prefix'] = old_accel_prefix
-
-        if action == FieldActions.COLOUR:
-            step_count = kwargs.get('step_count')
-            if step_count is None:
-                step_count = 100.0
-            step_sizes = colour.compute_steps(step_count)
-            oldactions = self._actions.get(FieldActions.COLOUR)
-            for step, size in zip(('l_step', 'a_step', 'b_step'), step_sizes):
-                if oldactions is not None:
-                    if oldactions[step] != size:
-                        message = "Cannot change colour steps for field: %s" % \
-                                  self._fieldname
-                        raise IndexerError(message)
-                kwargs[step] = size
-
 
         # Fields cannot be indexed as more than one type for "SORTABLE": to
         # implement this, we'd need to use a different prefix for each sortable
