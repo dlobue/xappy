@@ -358,7 +358,7 @@ def _act_sort_and_collapse(fieldname, doc, field, context, type=None, ranges=Non
 def _act_colour(fieldname, doc, field, context):
     for val in field.value:
         colterm, freq = val
-        doc.add_term(fieldname, colterm, wdfinc=freq)
+        doc.add_term(fieldname, colterm, wdfinc=freq + xapian.ColourWeight.trigger)
 
 class ActionContext(object):
     """The context in which an action is performed.
@@ -743,7 +743,7 @@ class ActionSet(object):
                 for val in field.value:
                     col, freq = val
                     proportion = float(freq)/ float(colour_vals[field.name])
-                    newval.append((col, int(proportion * 1000.0)))
+                    newval.append((col, int(proportion * xapian.ColourWeight.colour_sum)))
                 field.value = newval
 
     def perform(self, result, document, context, store_only=False):
