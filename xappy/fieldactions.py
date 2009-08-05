@@ -477,7 +477,8 @@ class FieldActions(object):
       Internally the frequencies in a field for a given document are
       normalised so that they sum to (approximately) 1000, so that
       weights across different documents can be meaningfully compared.
-      """
+
+    """
 
     # See the class docstring for the meanings of the following constants.
     STORE_CONTENT = 1
@@ -678,8 +679,7 @@ class FieldActions(object):
                 info[2](self._fieldname, doc, field, context, **kwargs)
 
     _action_info = {
-        COLOUR: ('COLOUR', ('step_count',), _act_colour,
-                 {'prefix': True}, ),
+        COLOUR: ('COLOUR', ('step_count',), _act_colour, {'prefix': True}, ),
         STORE_CONTENT: ('STORE_CONTENT', ('link_associations', ), _act_store_content, {}, ),
         INDEX_EXACT: ('INDEX_EXACT', (), _act_index_exact, {'prefix': True}, ),
         INDEX_FREETEXT: ('INDEX_FREETEXT', ('weight', 'language', 'stop', 'spell', 'nopos', 'allow_field_specific', 'search_by_default', ),
@@ -720,12 +720,13 @@ class ActionSet(object):
 
 
     def normalise_colour_frequencies(self, fields):
-        """ Modify all the colour frequencies specified for a field
-        with the COLOUR action so that they sum to 1000.
+        """Modify all the colour frequencies specified for a field with the
+        COLOUR action so that they sum to 1000.
+
         """
         colour_vals = collections.defaultdict(int)
 
-        #loop once to find the total frequency for each colour field
+        # loop once to find the total frequency for each colour field
         for field in fields:
             try:
                 actions = self.actions[field.name]
@@ -736,7 +737,7 @@ class ActionSet(object):
                     col, freq = val
                     colour_vals[field.name] += freq
 
-        #loop again to scale each frequency so that they sum to 1000
+        # loop again to scale each frequency so that they sum to 1000
         for field in fields:
             if field.name in colour_vals:
                 newval = []

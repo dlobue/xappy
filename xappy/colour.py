@@ -13,89 +13,99 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-"""
-colour.py utilities for bucketing and clustering colours.
+"""colour.py utilities for bucketing and clustering colours.
 
 Terminology:
 
- rgb: rgb colour data (a 3-tuple) each coordinate in being an integer
-      the range [0,256)
+ rgb: colour data in the RGB colourspace (a 3-tuple) each coordinate in being
+    an integer the range [0..255]
 
- lab: lab colour data (a 3-tuple) each coordinate being a float in a
-      range determined by the conversion mechanism - see the function
-      compute_range_limits and the variable lab_ranges. (Clearly there
-      are only 256^3 possible values obtainable from conversion from
-      rbg data in the format we use.
+ lab: colour data in the L*a*b* colourspace (a 3-tuple) each coordinate being a
+    float in a range determined by the conversion mechanism - see the function
+    _compute_range_limits and the variable lab_ranges. (Clearly there are only
+    256^3 possible values obtainable from conversion from rgb data in the
+    format we use.)
 
- step_count: the granularity of the quantization of the lab colour
-             space - this is taken as a parameter by most routines. A
-             given application is likely to want to only use one
-             step_count and stick with it. It makes no sense to mix
-             terms generated with different step counts.
+ step_count: the granularity of the quantization of the lab colour space - this
+    is taken as a parameter by most routines. A given application is likely to
+    want to only use one step_count and stick with it. It makes no sense to mix
+    terms generated with different step counts.
 
- bucket: the step_count and lab_ranges induce a partitioning of the 3d
-         lab colour space into cubiods. A given bucket is identified
-         by the 3-tuple for the its indices in the whole
-         space. These indices are only useful in the range [0, step_count).
-         Every bucket represent a region of the lab colour space.
+ bucket: the step_count and lab_ranges induce a partitioning of the 3d lab
+    colour space into cubiods. A given bucket is identified by the 3-tuple for
+    the its indices in the whole space. These indices are only useful in the
+    range [0, step_count).  Every bucket represent a region of the lab colour
+    space.
          
- term: Each bucket has a string representation for storing as a term
-       in the database. This is just the the hex string for the bucket
-       position in the lexicographic ordering of bucket coordinates.
-"""
+ term: Each bucket has a string representation for storing as a term in the
+    database. This is just the the hex string for the bucket position in the
+    lexicographic ordering of bucket coordinates.
 
+"""
+__docformat__ = "restructuredtext en"
+
+# Standard python modules
 import collections
 import operator
 import itertools
-import marshall
+import math
 
+# Third-party modules
 import colour_data
 import colormath
 import colormath.color_objects
 import numpy
 import scipy.cluster
 import scipy.ndimage
-import xapian
-import xappy
 
-def compute_range_limits(dim=256):
-    """ This finds the extremes of the Lab coordinates by iterating
-    over all possible rgb colours (assuming `dim` steps in each of the
-    rgb axes).
+# Xapian modules
+import xapian
+from query import Query
+
+def _compute_range_limits(dim=256):
+    """Compute the range of possible Lab coordinates.
+    
+    This finds the extremes of the Lab coordinates by iterating over all
+    possible rgb colours (assuming `dim` steps in each of the rgb axes).
 
     Warning: this is slow, but it's only needed for checking and
     testing, not for indexing or query generation.
+
     """
     min_l = min_a = min_b = 10000000
     max_l = max_a = max_b = -10000000
-    try:
-        gen = itertools.product(xrange(dim), repeat = 3)
-    except AttributeError:
-        # itertools.product new in 2.6
-        gen = ((x,y,z)
-               for x in xrange(dim)
-               for y in xrange(dim)
-               for z in xrange(dim))
-    for rgb_coords in gen:
-        rgb = colormath.color_objects.RGBColor(*rgb_coords)
-        lab = rgb.convert_to('lab')
-        min_l = min(min_l, lab.lab_l)
-        min_a = min(min_a, lab.lab_a)
-        min_b = min(min_b, lab.lab_b)
-        max_l = max(max_l, lab.lab_l)
-        max_a = max(max_a, lab.lab_a)
-        max_b = max(max_b, lab.lab_b)
+
+    for x in xrange(256):
+        for y in xrange(256):
+            for z in xrange(256):
+                rgb = colormath.color_objects.RGBColor(*rgb_coords)
+                lab = rgb.convert_to('lab')
+                min_l = min(min_l, lab.lab_l)
+                min_a = min(min_a, lab.lab_a)
+                min_b = min(min_b, lab.lab_b)
+                max_l = max(max_l, lab.lab_l)
+                max_a = max(max_a, lab.lab_a)
+                max_b = max(max_b, lab.lab_b)
+
     return (min_l, max_l), (min_a, max_a), (min_b, max_b)    
 
-# in order to decide on the size of the buckets we want to know the
-# possible range of value that each coordinate can take.
-
-#lab_ranges = compute_range_limits()
-
+# The possible ranges of Lab values.  This can be recalculated if necessary
+# using the _compute_range_limits() function - the following hardcoded values
+# are the output of this function.
 lab_ranges = (
-    (0.0, 99.999984533331272),
-    (-86.182949405160798, 98.235320176646439),
-    (-107.86546414496824, 94.477318179693782))
+              (0.0, 99.999984533331272),
+              (-86.182949405160798, 98.235320176646439),
+              (-107.86546414496824, 94.477318179693782)
+)
+
+def cartesian_distance(c1, c2):
+    """Calculate the cartesian distance between two colour values.
+
+    This corresponds to the delta-E 1976 distance (dE76) if the colour values
+    are in the L*a*b* colour space.
+
+    """
+    return math.sqrt
 
 max_distance = pow(sum(pow(x[1]-x[0], 2) for x in lab_ranges), 0.5)
 
@@ -197,8 +207,10 @@ def cluster_coords(coords, coord_fun=None, distance_factor=0.05):
     
     distance = distance_factor * max_distance
     coord_list = list(coords)
-    source = (coord_list if coord_fun is None
-              else map(coord_fun, coord_list))
+    if coord_fun is None:
+        source = coord_list
+    else:
+        source = map(coord_fun, coord_list)
     if len(source) < 2:
         yield coord_list
     else:
@@ -319,7 +331,7 @@ def query_from_clusters(sconn, field, clusters, step_count, averaging=False):
     prefix = sconn._field_mappings.get_prefix(field)
 
     def term_subqs(ts):
-        return [xappy.Query(xapian.Query(prefix + term)) * weight for
+        return [Query(xapian.Query(prefix + term)) * weight for
                 term, weight in ts.iteritems()]
 
 
@@ -328,9 +340,9 @@ def query_from_clusters(sconn, field, clusters, step_count, averaging=False):
         weighted_terms = terms_and_weights(cluster, step_count)
         if averaging:
             average_weights(weighted_terms)
-        subqs.append(xappy.Query.compose(xappy.Query.OP_OR,
-                                         term_subqs(weighted_terms)))
-    return xappy.Query.compose(xappy.Query.OP_AND, subqs)
+        subqs.append(Query.compose(Query.OP_OR,
+                                   term_subqs(weighted_terms)))
+    return Query.compose(Query.OP_AND, subqs)
 
 
 colour_terms_cache = {}
@@ -429,5 +441,3 @@ def facet_palette_query(conn, facets, palette, dimensions, step_count):
             yield cluster_vals
 
     return query_from_clusters(conn, fieldname, make_clusters(), step_count)
-                             
-                              

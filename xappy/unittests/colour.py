@@ -19,7 +19,6 @@ from xappytest import *
 from xappy.fieldactions import FieldActions
 import xappy.colour
 import xapian
-import colormath
 
 colourdata = [[(0, 0, 0), 10, 0.01], #black
               [(255, 255, 255), 5,  0.01 ], #white
@@ -146,8 +145,7 @@ class ColourSearchTestCase(TestCase):
         self.sconn.close()
 
     def test_basic_search(self):
-        """ Ensure that query_colour can be called with
-        generating an error.
+        """Ensure that query_colour can be called without generating an error.
 
         """
         
@@ -155,7 +153,7 @@ class ColourSearchTestCase(TestCase):
         
 
     def test_correct_colour(self):
-        """ Check that correct document is found when querying for the
+        """Check that correct document is found when querying for the
         colours that were supplied at indexing time.
 
         """
