@@ -382,9 +382,10 @@ rgb_data = {
 colour_names = list(rgb_data.iterkeys())
 colour_names.sort(key = len, reverse=True)
 
+default_spread = 0.04
 common_spread_default = 0.1
 colour_spreads = collections.defaultdict(
-    float,
+    lambda : float(default_spread),
     ( (cname, common_spread_default) for cname in (
         "Red", "Green", "Blue",
         "Yellow", "Black", "White"
