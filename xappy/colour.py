@@ -370,17 +370,19 @@ def text_weights(text, step_count,
     off according to distance from the colours found. The number of
     terms added depends on the spread for the colour given by
     colour_spreads.  This is a dictionary mapping colour names to a
-    figure on the range 0->1.  A spread of 0 means that only the
-    actual colour mentioned will be included; a spread of 1 means the
-    whole colour space will be included. Higher values are unlikely to
-    be desirable.
+    integer figures in the range 0->1000.  A spread of 0 means that
+    only the actual colour mentioned will be included; a spread of 1
+    means the whole colour space will be included. Higher values are
+    unlikely to be desirable.
 
     """
     weights = collections.defaultdict(float)
-    for colour_name, rgb in rbg_data:
+    for colour_name, rgb in rgb_data.iteritems():
         count = text.count(colour_name)
         spread = colour_spreads[colour_name]
-        terms_and_weights((rgb, count, spread), step_count, weights)
+        terms_and_weights([(rgb, count, spread)], step_count, weights)
+    for k in weights:
+        weights[k] = int(weights[k] * 1000)
     return weights
 
 
@@ -439,7 +441,6 @@ def facet_palette_query(conn, facets, palette, dimensions, step_count):
                               mean_weight, spread)
                              for x in rgbs]
             yield cluster_vals
-
     return query_from_clusters(conn, fieldname, make_clusters(), step_count)
 
 def colour_parse(text,
@@ -469,9 +470,9 @@ def colour_parse(text,
     the keys in the dictionaries `rgb_data` and `colour_spreads`.
 
     """
-
     colours_found = []
     text_remaining = text.lower()
+
     for name in colour_names:
         new_text = text_remaining.replace(name.lower(), '')
         if len(new_text) != len(text_remaining):
@@ -480,6 +481,13 @@ def colour_parse(text,
             text_remaining = new_text
 
     return colours_found, text_remaining
+
+def find_colours(text, step_count, weight = 100):
+    """ Find colours in text, construct a dictionary of mapping terms
+    for the found colours to weight.
+    """
+    cols,_ = colour_parse(text)
+    return dict((rgb2term(c[0], step_count), weight) for c in cols)
 
 def colour_text_query(text, step_count, conn, field,
                       colour_names=colour_data.colour_names,
