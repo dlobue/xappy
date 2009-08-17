@@ -72,8 +72,8 @@ def _compute_range_limits(dim=256):
     testing, not for indexing or query generation.
 
     """
-    min_l = min_a = min_b = 10000000
-    max_l = max_a = max_b = -10000000
+    min_l = min_a = min_b = 10000000.0
+    max_l = max_a = max_b = -10000000.0
 
     for x in xrange(256):
         for y in xrange(256):
@@ -105,9 +105,10 @@ def cartesian_distance(c1, c2):
     are in the L*a*b* colour space.
 
     """
-    return math.sqrt
+    return math.sqrt(sum(map(lambda x, y: (x - y) * (x - y), c1, c2)))
 
-max_distance = pow(sum(pow(x[1]-x[0], 2) for x in lab_ranges), 0.5)
+max_distance = cartesian_distance([x[0] for x in lab_ranges],
+                                  [x[1] for x in lab_ranges])
 
 def compute_steps(count):
     """ Compute the size of a single bucket for the given `count`.
@@ -117,8 +118,10 @@ def compute_steps(count):
              r in lab_ranges)
 
 step_size_cache = {}
-
 def step_sizes(step_count):
+    """Get the step size for each Lab dimentsion for a given step count.
+
+    """
     try:
         return step_size_cache[step_count]
     except KeyError:
@@ -127,10 +130,18 @@ def step_sizes(step_count):
         return sizes
 
 def rgb2lab(rgb):
+    """Convert an RGB tuple to Lab.
+
+    """
     rgb = colormath.color_objects.RGBColor(*rgb)
     return rgb.convert_to('lab').get_value_tuple()
 
 def check_in_range(lab):
+    """Check that a coordinate is in the acceptable Lab ranges.
+
+    Returns True if in range, False otherwise.
+
+    """
     l, a, b = lab
     r = lab_ranges
     return ( (r[0][0] <= l <= r[0][1]) and
@@ -138,54 +149,67 @@ def check_in_range(lab):
              (r[2][0] <= b <= r[2][1]) )
 
 def lab2bucket(lab, step_count):
-    """ return the indices of the bucket within which the point l, a,
-    b falls, assuming that the space is divided up into `step_count`
-    steps in each coordinate.
+    """Find which bucket a given coordinate occurs in.
+    
+    Return the indices of the bucket within which the point lab falls, assuming
+    that the space is divided up into `step_count` steps in each coordinate.
 
     """
     l, a, b = lab
     l_step, a_step, b_step = step_sizes(step_count)
-    return tuple(int(x) for x in ((l - lab_ranges[0][0]) // l_step,
-                                  (a - lab_ranges[1][0]) // a_step,
-                                  (b - lab_ranges[2][0]) // b_step))
+    return (int((l - lab_ranges[0][0]) / l_step),
+            int((a - lab_ranges[1][0]) / a_step),
+            int((b - lab_ranges[2][0]) / b_step))
 
 def bucket2lab(bucket, step_count):
-    """ return the coordinates of the least point of `bucket`.
+    """Return the coordinates of the least point of `bucket`.
 
     """
     l_step, a_step, b_step = step_sizes(step_count)
     x, y, z = bucket
-    return (lab_ranges[0][0] + x * l_step,
+    return (lab_ranges[0][1] + x * l_step,
             lab_ranges[1][1] + y * a_step,
             lab_ranges[2][1] + z * b_step)
 
 def rgb2bucket(rgb, step_count):
+    """Convert some RGB coordinates into the indices of a bucket.
+
+    """
     return lab2bucket(rgb2lab(rgb), step_count)
 
 def encode_bucket(bucket_indices, step_count):
-    """ Return a hex string identifying the supplied bucket. Buckets
-    are numbered according to their position in the lexicographic
+    """Return a hex string identifying the supplied bucket.
+    
+    Buckets are numbered according to their position in the lexicographic
     ordering of their coordinates.
+
     """
 
     l, a, b = bucket_indices
     position = (l +
                 step_count * a +
-                pow(step_count, 2) * b)
+                step_count * step_count * b)
     return hex(position)
 
 def decode_bucket(bucket_id, step_count):
-    """ return the bucket indices of a string encoded with
-    encode_bucket"""
+    """Return the bucket indices of a string encoded with encode_bucket.
+    
+    """
     val = int(bucket_id, 16)
-    b, rem = divmod(val, pow(step_count,2))
+    b, rem = divmod(val, step_count * step_count)
     a, l = divmod(rem, step_count)
     return l, a, b
 
 def lab2term(lab, step_count):
+    """Convert some Lab coordinates to a term for the corresponding bucket.
+
+    """
     return encode_bucket(lab2bucket(lab, step_count), step_count)
 
 def rgb2term(rgb, step_count):
+    """Convert some RGB coordinates to a term for the corresponding bucket.
+
+    """
     return lab2term(rgb2lab(rgb), step_count)
 
 # synonyms
@@ -193,7 +217,9 @@ term2bucket = decode_bucket
 bucket2term = encode_bucket
 
 def cluster_coords(coords, coord_fun=None, distance_factor=0.05):
-    """ `coords` is an iterable, `coord_fun` is a function that yields
+    """Cluster a set of coordinates into groups.
+    
+    `coords` is an iterable, `coord_fun` is a function that yields
     lab coordinates from elements of `coords`. If `coord_fun` is None
     then the `coords` must contain lab coordinates.
 
@@ -203,6 +229,7 @@ def cluster_coords(coords, coord_fun=None, distance_factor=0.05):
 
     The return value groups `coords` into clusters containing elements
     within the specified distance of each other.
+
     """
 
     distance = distance_factor * max_distance
@@ -228,7 +255,8 @@ def cluster_coords(coords, coord_fun=None, distance_factor=0.05):
             yield map(operator.itemgetter(1), group)
 
 def cluster_terms(terms, step_count, distance_factor=0.05):
-    """ Clusters terms by converting them to corresponding lab coordinates.
+    """Clusters terms by converting them to corresponding lab coordinates.
+
     See cluster_coords.
 
     """
@@ -237,9 +265,10 @@ def cluster_terms(terms, step_count, distance_factor=0.05):
         terms, coord_fun=coord_fun, distance_factor = distance_factor)
 
 def average_weights(terms_and_weights):
-    """ terms_and_weights is a dictionary mapping terms to weights.
-        The weights are replaced by the average weight amongst them
-        all.
+    """Average the weights in a set of terms.
+    
+    `terms_and_weights` is a dictionary mapping terms to weights.  The weights
+    are replaced by the average weight amongst them all.
 
     """
     average =  sum(terms_and_weights.itervalues()) / len(terms_and_weights)
@@ -349,7 +378,7 @@ colour_terms_cache = {}
 
 def colour_terms(step_count, rgb_data=colour_data.rgb_data):
     """ Return a dictionary of name -> term for `step_count`
-    corresponding to the name -> rgb data in `rbg_data`.
+    corresponding to the name -> rgb data in `rgb_data`.
 
     """
     try:

@@ -515,7 +515,6 @@ class FieldActions(object):
 
         """
         if action in self._unsupported_actions:
-            print "action: ", action
             raise errors.IndexerError("Action unsupported with this release of xapian")
 
         if action not in (FieldActions.STORE_CONTENT,
@@ -723,12 +722,13 @@ class ActionSet(object):
         COLOUR action so that they sum to 1000.
 
         """
-        colour_vals = collections.defaultdict(int)
+        colour_vals = {}
         
         def get_fields(field_or_group):
-            return (field_or_group.fields 
-                    if isinstance(field_or_group, fields.FieldGroup)
-                    else [field_or_group])
+            if isinstance(field_or_group, fields.FieldGroup):
+                return field_or_group.fields
+            else:
+                return [field_or_group]
 
         # loop once to find the total frequency for each colour field
         for field_or_group in fields_or_groups:
@@ -739,7 +739,8 @@ class ActionSet(object):
                 except KeyError:
                     continue
                 if FieldActions.COLOUR in actions._actions:
-                    colour_vals[field.name] += field.weight
+                    colour_vals[field.name] = \
+                        colour_vals.get(field.name, 0) + field.weight
 
         # loop again to scale each frequency so that they sum to 1000
         for field_or_group in fields_or_groups:
