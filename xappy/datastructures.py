@@ -295,6 +295,22 @@ class ProcessedDocument(object):
         slot = self._fieldmappings.get_slot(field, purpose)
         return self._doc.get_value(slot)
 
+    def remove_value(self, field, purpose=''):
+        """
+        Removes value for specified field, and purpose if given.
+        """
+        __slot = self._fieldmappings.get_slot(field, purpose)
+        return self._doc.remove_value(__slot)
+
+    def clear_field(self, field):
+        """
+        Removes all terms, values, and stored data for the requested field.
+        """
+        __slots = filter(lambda x: field in x, self._fieldmappings._slots)
+        map(lambda x: self.remove_value(*x), __slots)
+        map(lambda x: self.remove_term(field, x), self.data[field])
+        del self.data[field]
+
     def prepare(self):
         """Prepare the document for adding to a xapian database.
 
