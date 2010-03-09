@@ -23,12 +23,12 @@ import sys
 
 # Use setuptools if we're part of a larger build system which is already using
 # it.
-if ('setuptools' in sys.modules):
+try:
     import setuptools
     from setuptools import setup, Extension
     from setuptools.command.build_ext import build_ext
     using_setuptools = True
-else:
+except ImportError:
     import distutils
     from distutils.core import setup, Extension
     from distutils import sysconfig
